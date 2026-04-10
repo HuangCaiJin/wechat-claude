@@ -29,10 +29,11 @@ export function createPermissionBroker(onTimeout?: OnPermissionTimeout) {
         logger.warn('Permission timeout, auto-denied', { accountId, toolName });
         pending.delete(accountId);
         timedOut.set(accountId, Date.now());
-        // Clean up grace period entry after GRACE_PERIOD
         setTimeout(() => timedOut.delete(accountId), GRACE_PERIOD);
         resolve(false);
-        onTimeout?.();
+        try { onTimeout?.(); } catch (err) {
+          logger.error('onTimeout callback threw', { error: err instanceof Error ? err.message : String(err) });
+        }
       }, PERMISSION_TIMEOUT);
 
       pending.set(accountId, { toolName, toolInput, resolve, timer });

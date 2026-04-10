@@ -41,6 +41,13 @@ export interface PendingPermission {
 const DEFAULT_MAX_HISTORY = 100;
 const MAX_MESSAGE_CONTENT_LENGTH = 10_000; // per-message content cap to prevent disk abuse
 
+function trimChatHistory(session: Session): void {
+  const maxLen = session.maxHistoryLength || DEFAULT_MAX_HISTORY;
+  if (session.chatHistory.length > maxLen) {
+    session.chatHistory = session.chatHistory.slice(-maxLen);
+  }
+}
+
 export function createSessionStore() {
   function getSessionPath(accountId: string): string {
     validateAccountId(accountId);
@@ -69,13 +76,7 @@ export function createSessionStore() {
 
   function save(accountId: string, session: Session): void {
     mkdirSync(SESSIONS_DIR, { recursive: true });
-
-    // Trim chat history if it exceeds max length before saving
-    const maxLen = session.maxHistoryLength || DEFAULT_MAX_HISTORY;
-    if (session.chatHistory.length > maxLen) {
-      session.chatHistory = session.chatHistory.slice(-maxLen);
-    }
-
+    trimChatHistory(session);
     saveJson(getSessionPath(accountId), session);
   }
 
@@ -108,11 +109,7 @@ export function createSessionStore() {
       timestamp: Date.now(),
     });
 
-    // Trim if exceeds max length
-    const maxLen = session.maxHistoryLength || DEFAULT_MAX_HISTORY;
-    if (session.chatHistory.length > maxLen) {
-      session.chatHistory = session.chatHistory.slice(-maxLen);
-    }
+    trimChatHistory(session);
   }
 
   function getChatHistoryText(session: Session, limit?: number): string {

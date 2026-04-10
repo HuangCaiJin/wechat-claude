@@ -3,6 +3,7 @@ import { scanAllSkills, formatSkillList, findSkill, type SkillInfo } from '../cl
 import { loadConfig, saveConfig } from '../config.js';
 import { readFileSync, existsSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve, isAbsolute } from 'node:path';
+import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -18,12 +19,6 @@ function validateCwdPath(inputPath: string): { valid: boolean; reason?: string; 
     return { valid: false, reason: '路径必须是绝对路径' };
   }
 
-  for (const blocked of BLOCKED_PATH_PREFIXES) {
-    if (resolved === blocked || resolved.startsWith(blocked + '/')) {
-      return { valid: false, reason: `禁止访问系统目录: ${blocked}` };
-    }
-  }
-
   if (!existsSync(resolved)) {
     return { valid: false, reason: `路径不存在: ${resolved}` };
   }
@@ -32,7 +27,21 @@ function validateCwdPath(inputPath: string): { valid: boolean; reason?: string; 
     return { valid: false, reason: `路径不是目录: ${resolved}` };
   }
 
-  return { valid: true, resolved };
+  // Resolve symlinks to get the real path, then check against blocked prefixes
+  let real: string;
+  try {
+    real = realpathSync(resolved);
+  } catch {
+    return { valid: false, reason: `无法解析路径: ${resolved}` };
+  }
+
+  for (const blocked of BLOCKED_PATH_PREFIXES) {
+    if (real === blocked || real.startsWith(blocked + '/')) {
+      return { valid: false, reason: `禁止访问系统目录: ${blocked}` };
+    }
+  }
+
+  return { valid: true, resolved: real };
 }
 
 const HELP_TEXT = ` Commands

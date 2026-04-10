@@ -494,7 +494,11 @@ async function sendToClaude(
 
       const chunks = splitMessage(toSend);
       for (const chunk of chunks) {
-        await sender.sendText(fromUserId, contextToken, chunk);
+        try {
+          await sender.sendText(fromUserId, contextToken, chunk);
+        } catch (err) {
+          logger.warn('Failed to send streamed chunk', { error: err instanceof Error ? err.message : String(err) });
+        }
       }
     }
 
@@ -550,21 +554,22 @@ async function sendToClaude(
 
     let result = await claudeQuery(queryOptions);
 
+    // Helper: if the abortController was aborted during a failed query, create a fresh one for retry
+    function refreshAbortControllerIfNeeded(): void {
+      if (abortController.signal.aborted) {
+        abortController = new AbortController();
+        activeControllers.set(account.accountId, abortController);
+        queryOptions.abortController = abortController;
+      }
+    }
+
     // If resume failed (e.g. corrupted session), retry without resume
     if (result.error && queryOptions.resume) {
       logger.warn('Resume failed, retrying without resume', { error: result.error, sessionId: queryOptions.resume });
       queryOptions.resume = undefined;
       session.sdkSessionId = undefined;
       sessionStore.save(account.accountId, session);
-
-      // The abortController may have been aborted during the failed query.
-      // Create a fresh one for the retry to avoid immediate abort.
-      if (abortController.signal.aborted) {
-        abortController = new AbortController();
-        activeControllers.set(account.accountId, abortController);
-        queryOptions.abortController = abortController;
-      }
-
+      refreshAbortControllerIfNeeded();
       const retryResult = await claudeQuery(queryOptions);
       Object.assign(result, retryResult);
     }
@@ -573,14 +578,7 @@ async function sendToClaude(
     if (!result.text && !result.error) {
       logger.warn('Empty result, retrying once', { sessionId: result.sessionId });
       queryOptions.resume = undefined;
-
-      // Same: ensure abortController is fresh for retry
-      if (abortController.signal.aborted) {
-        abortController = new AbortController();
-        activeControllers.set(account.accountId, abortController);
-        queryOptions.abortController = abortController;
-      }
-
+      refreshAbortControllerIfNeeded();
       const retryResult = await claudeQuery(queryOptions);
       if (retryResult.text) Object.assign(result, retryResult);
     }
