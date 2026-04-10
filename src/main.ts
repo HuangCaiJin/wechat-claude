@@ -291,28 +291,36 @@ async function handleMessage(
   // -- Permission state handling --
 
   if (session.state === 'waiting_permission') {
-    // Check if there's actually a pending permission (may be lost after restart)
-    const pendingPerm = permissionBroker.getPending(account.accountId);
-    if (!pendingPerm) {
+    // Allow /clear and /reset to break out of waiting_permission state
+    if (userText.startsWith('/clear') || userText.startsWith('/reset')) {
+      permissionBroker.rejectPending(account.accountId);
       session.state = 'idle';
       sessionStore.save(account.accountId, session);
-      await sender.sendText(fromUserId, contextToken, '⚠️ 权限请求已失效（可能因服务重启），请重新发送你的请求。');
+      // Fall through to command routing below
+    } else {
+      // Check if there's actually a pending permission (may be lost after restart)
+      const pendingPerm = permissionBroker.getPending(account.accountId);
+      if (!pendingPerm) {
+        session.state = 'idle';
+        sessionStore.save(account.accountId, session);
+        await sender.sendText(fromUserId, contextToken, '⚠️ 权限请求已失效（可能因服务重启），请重新发送你的请求。');
+        return;
+      }
+
+      const lower = userText.toLowerCase();
+      if (lower === 'y' || lower === 'yes') {
+        const hint = permissionBroker.resolvePermission(account.accountId, true);
+        const msgs = ['✅ 已允许'];
+        if (hint) msgs.push(hint);
+        await sender.sendText(fromUserId, contextToken, msgs.join('\n\n'));
+      } else if (lower === 'n' || lower === 'no') {
+        permissionBroker.resolvePermission(account.accountId, false);
+        await sender.sendText(fromUserId, contextToken, '❌ 已拒绝');
+      } else {
+        await sender.sendText(fromUserId, contextToken, '正在等待权限审批，请回复 y 或 n。');
+      }
       return;
     }
-
-    const lower = userText.toLowerCase();
-    if (lower === 'y' || lower === 'yes') {
-      const hint = permissionBroker.resolvePermission(account.accountId, true);
-      const msgs = ['✅ 已允许'];
-      if (hint) msgs.push(hint);
-      await sender.sendText(fromUserId, contextToken, msgs.join('\n\n'));
-    } else if (lower === 'n' || lower === 'no') {
-      const hint = permissionBroker.resolvePermission(account.accountId, false);
-      await sender.sendText(fromUserId, contextToken, hint ? '❌ 已拒绝' : '❌ 已拒绝');
-    } else {
-      await sender.sendText(fromUserId, contextToken, '正在等待权限审批，请回复 y 或 n。');
-    }
-    return;
   }
 
   // -- Command routing --
@@ -420,7 +428,7 @@ async function sendToClaude(
   sessionStore.save(account.accountId, session);
 
   // Create abort controller for this query so it can be cancelled by new messages
-  const abortController = new AbortController();
+  let abortController = new AbortController();
   activeControllers.set(account.accountId, abortController);
 
   // Record user message in chat history
@@ -548,6 +556,15 @@ async function sendToClaude(
       queryOptions.resume = undefined;
       session.sdkSessionId = undefined;
       sessionStore.save(account.accountId, session);
+
+      // The abortController may have been aborted during the failed query.
+      // Create a fresh one for the retry to avoid immediate abort.
+      if (abortController.signal.aborted) {
+        abortController = new AbortController();
+        activeControllers.set(account.accountId, abortController);
+        queryOptions.abortController = abortController;
+      }
+
       const retryResult = await claudeQuery(queryOptions);
       Object.assign(result, retryResult);
     }
@@ -556,6 +573,14 @@ async function sendToClaude(
     if (!result.text && !result.error) {
       logger.warn('Empty result, retrying once', { sessionId: result.sessionId });
       queryOptions.resume = undefined;
+
+      // Same: ensure abortController is fresh for retry
+      if (abortController.signal.aborted) {
+        abortController = new AbortController();
+        activeControllers.set(account.accountId, abortController);
+        queryOptions.abortController = abortController;
+      }
+
       const retryResult = await claudeQuery(queryOptions);
       if (retryResult.text) Object.assign(result, retryResult);
     }

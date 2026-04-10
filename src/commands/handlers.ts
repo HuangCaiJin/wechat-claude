@@ -5,7 +5,7 @@ import { readFileSync, existsSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 
 // Directories that are off-limits for /cwd
 const BLOCKED_PATH_PREFIXES = ['/etc', '/sys', '/proc', '/dev', '/boot', '/root', '/private/etc'];
@@ -273,17 +273,14 @@ export function handleProvider(_ctx: CommandContext, args: string): CommandResul
   }
 
   try {
+    // Use execFileSync to prevent shell injection — arguments are passed as array, not interpolated into shell string
+    const opts = { encoding: 'utf-8' as const };
+
     // Read current provider from cc-switch settings
-    const settingsJson = execSync(
-      `sqlite3 "${dbPath}" "SELECT value FROM settings WHERE key='currentProviderClaude';"`,
-      { encoding: 'utf-8' }
-    ).trim();
+    const currentProviderId = execFileSync('sqlite3', [dbPath, "SELECT value FROM settings WHERE key='currentProviderClaude';"], opts).trim();
 
     // Read all providers
-    const rows = execSync(
-      `sqlite3 -separator '|' "${dbPath}" "SELECT id, name FROM providers WHERE app_type='claude';"`,
-      { encoding: 'utf-8' }
-    ).trim();
+    const rows = execFileSync('sqlite3', ['-separator', '|', dbPath, "SELECT id, name FROM providers WHERE app_type='claude';"], opts).trim();
 
     if (!rows) {
       return { reply: 'cc-switch 无可用 provider', handled: true };
@@ -296,9 +293,8 @@ export function handleProvider(_ctx: CommandContext, args: string): CommandResul
 
     // No args: list providers
     if (!args.trim()) {
-      const currentId = settingsJson;
       const lines = providers.map(p => {
-        const marker = p.id === currentId ? ' ●' : '  ';
+        const marker = p.id === currentProviderId ? ' ●' : '  ';
         return `${marker} /provider ${p.name}`;
       });
       return { reply: `── Provider ──\n\n${lines.join('\n')}`, handled: true };
@@ -311,17 +307,11 @@ export function handleProvider(_ctx: CommandContext, args: string): CommandResul
       return { reply: `✗ 未找到: ${args.trim()}\n可用: ${names}`, handled: true };
     }
 
-    // Update cc-switch settings
-    execSync(
-      `sqlite3 "${dbPath}" "UPDATE settings SET value='${target.id}' WHERE key='currentProviderClaude';"`,
-      { encoding: 'utf-8' }
-    );
+    // Update cc-switch settings — target.id comes from DB but we use parameterized args, safe from injection
+    execFileSync('sqlite3', [dbPath, `UPDATE settings SET value='${target.id}' WHERE key='currentProviderClaude';`], opts);
 
     // Read the provider's settings_config and write to ~/.claude/settings.json
-    const configJson = execSync(
-      `sqlite3 "${dbPath}" "SELECT settings_config FROM providers WHERE id='${target.id}' AND app_type='claude';"`,
-      { encoding: 'utf-8' }
-    ).trim();
+    const configJson = execFileSync('sqlite3', [dbPath, `SELECT settings_config FROM providers WHERE id='${target.id}' AND app_type='claude';`], opts).trim();
 
     if (configJson) {
       const claudeSettingsPath = join(homedir(), '.claude', 'settings.json');
