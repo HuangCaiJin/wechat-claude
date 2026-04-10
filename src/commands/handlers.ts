@@ -75,34 +75,39 @@ export function handleHelp(_args: string): CommandResult {
 }
 
 export function handleClear(ctx: CommandContext): CommandResult {
-  // Reject any pending permission to avoid orphaned promise corrupting new session
   ctx.rejectPendingPermission?.();
   const newSession = ctx.clearSession();
   Object.assign(ctx.session, newSession);
-  return { reply: '✅ 会话已清除，下次消息将开始新会话。', handled: true };
+  return { reply: '↻ 会话已清除', handled: true };
 }
 
 export function handleCwd(ctx: CommandContext, args: string): CommandResult {
   if (!args) {
-    return { reply: `当前工作目录: ${ctx.session.workingDirectory}\n用法: /cwd <路径>`, handled: true };
+    return { reply: `📂 ${ctx.session.workingDirectory}`, handled: true };
   }
   const check = validateCwdPath(args);
   if (!check.valid) {
-    return { reply: `❌ 无效路径: ${check.reason}`, handled: true };
+    return { reply: `✗ ${check.reason}`, handled: true };
   }
   ctx.updateSession({ workingDirectory: check.resolved! });
-  return { reply: `✅ 工作目录已切换为: ${check.resolved}`, handled: true };
+  return { reply: `📂 ${check.resolved}`, handled: true };
 }
 
 export function handleModel(ctx: CommandContext, args: string): CommandResult {
   if (!args) {
-    return { reply: '用法: /model <模型名称>\n例: /model claude-sonnet-4-6', handled: true };
+    return { reply: `模型: ${ctx.session.model ?? '默认'}`, handled: true };
   }
   ctx.updateSession({ model: args });
-  return { reply: `✅ 模型已切换为: ${args}`, handled: true };
+  return { reply: `✓ 模型 → ${args}`, handled: true };
 }
 
 const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto'] as const;
+const PERMISSION_LABELS: Record<string, string> = {
+  default: '🔒 默认 · 逐次审批',
+  acceptEdits: '✏️ 编辑免审 · 其他审批',
+  plan: '👁 只读 · 禁止写操作',
+  auto: '⚡ 全自动（危险）',
+};
 const PERMISSION_DESCRIPTIONS: Record<string, string> = {
   default: '每次工具使用需手动审批',
   acceptEdits: '自动批准文件编辑，其他需审批',
@@ -114,43 +119,40 @@ export function handlePermission(ctx: CommandContext, args: string): CommandResu
   if (!args) {
     const current = ctx.session.permissionMode ?? 'default';
     const lines = [
-      '🔒 当前权限模式: ' + current,
+      PERMISSION_LABELS[current],
       '',
-      '可用模式:',
-      ...PERMISSION_MODES.map(m => `  ${m} — ${PERMISSION_DESCRIPTIONS[m]}`),
-      '',
-      '用法: /permission <模式>',
+      ...PERMISSION_MODES.map(m => `  /perm ${m.padEnd(14)}${PERMISSION_LABELS[m]}`),
     ];
     return { reply: lines.join('\n'), handled: true };
   }
   const mode = args.trim();
   if (!PERMISSION_MODES.includes(mode as any)) {
     return {
-      reply: `未知模式: ${mode}\n可用: ${PERMISSION_MODES.join(', ')}`,
+      reply: `✗ 未知模式\n可用: ${PERMISSION_MODES.join(', ')}`,
       handled: true,
     };
   }
   if (mode === 'auto') {
-    // Require explicit confirmation token to prevent accidental activation
     return {
-      reply: '⚠️ 危险操作：auto 模式将自动批准所有工具调用（包括 Bash 命令执行），无需手动确认。\n\n如确认开启，请发送：/permission auto confirm',
+      reply: '⚠ auto 模式将自动批准所有工具调用\n如确认，发送 /perm auto confirm',
       handled: true,
     };
   }
   ctx.updateSession({ permissionMode: mode as any });
-  return { reply: `✅ 权限模式已切换为: ${mode}\n${PERMISSION_DESCRIPTIONS[mode]}`, handled: true };
+  return { reply: PERMISSION_LABELS[mode], handled: true };
 }
 
 export function handleStatus(ctx: CommandContext): CommandResult {
   const s = ctx.session;
   const mode = s.permissionMode ?? 'default';
+  const cwd = s.workingDirectory.split('/').slice(-2).join('/');
   const lines = [
-    '📊 会话状态',
-    '',
-    `工作目录: ${s.workingDirectory}`,
-    `模型: ${s.model ?? '默认'}`,
-    `权限模式: ${mode}`,
-    `会话ID: ${s.sdkSessionId ?? '无'}`,
+    `── Status ──────`,
+    `📂 ${cwd}`,
+    `🤖 ${s.model ?? '默认'}`,
+    `🔐 ${mode}`,
+    `📝 ${s.chatHistory?.length ?? 0} 条记录`,
+    `──`,
     `状态: ${s.state}`,
   ];
   return { reply: lines.join('\n'), handled: true };
@@ -160,16 +162,16 @@ export function handleSkills(args: string): CommandResult {
   invalidateSkillCache();
   const skills = getSkills();
   if (skills.length === 0) {
-    return { reply: '未找到已安装的 skill。', handled: true };
+    return { reply: '无已安装 Skill', handled: true };
   }
 
   const showFull = args.trim().toLowerCase() === 'full';
   if (showFull) {
     const lines = skills.map(s => `/${s.name}\n   ${s.description}`);
-    return { reply: `📋 已安装的 Skill (${skills.length}):\n\n${lines.join('\n\n')}`, handled: true };
+    return { reply: `── Skill (${skills.length}) ──\n\n${lines.join('\n\n')}`, handled: true };
   }
   const lines = skills.map(s => `/${s.name}`);
-  return { reply: `📋 已安装的 Skill (${skills.length}):\n\n${lines.join('\n')}\n\n使用 /skills full 查看完整描述`, handled: true };
+  return { reply: `── Skill (${skills.length}) ──\n\n${lines.join('\n')}\n\n/skills full 查看描述`, handled: true };
 }
 
 const MAX_HISTORY_LIMIT = 100;
@@ -177,13 +179,13 @@ const MAX_HISTORY_LIMIT = 100;
 export function handleHistory(ctx: CommandContext, args: string): CommandResult {
   const limit = args ? parseInt(args, 10) : 20;
   if (isNaN(limit) || limit <= 0) {
-    return { reply: '用法: /history [数量]\n例: /history 50（显示最近50条对话）', handled: true };
+    return { reply: '用法: /history [数量]', handled: true };
   }
   const effectiveLimit = Math.min(limit, MAX_HISTORY_LIMIT);
 
-  const historyText = ctx.getChatHistoryText?.(effectiveLimit) || '暂无对话记录';
+  const historyText = ctx.getChatHistoryText?.(effectiveLimit) || '暂无记录';
 
-  return { reply: `📝 对话记录（最近${effectiveLimit}条）:\n\n${historyText}`, handled: true };
+  return { reply: `── 最近 ${effectiveLimit} 条 ──\n\n${historyText}`, handled: true };
 }
 
 /** 完全重置会话（包括工作目录等设置） */
@@ -194,21 +196,21 @@ export function handleReset(ctx: CommandContext): CommandResult {
   newSession.model = undefined;
   newSession.permissionMode = undefined;
   Object.assign(ctx.session, newSession);
-  return { reply: '✅ 会话已完全重置，所有设置恢复默认。', handled: true };
+  return { reply: '↻ 已完全重置', handled: true };
 }
 
-/** 压缩上下文 — 清除 SDK 会话 ID，开始新上下文但保留聊天历史 */
+/** 压缩上下文 */
 export function handleCompact(ctx: CommandContext): CommandResult {
   const currentSessionId = ctx.session.sdkSessionId;
   if (!currentSessionId) {
-    return { reply: 'ℹ️ 当前没有活动的 SDK 会话，无需压缩。', handled: true };
+    return { reply: '无活动会话，无需压缩', handled: true };
   }
   ctx.updateSession({
     previousSdkSessionId: currentSessionId,
     sdkSessionId: undefined,
   });
   return {
-    reply: '✅ 上下文已压缩\n\n下次消息将开始新的 SDK 会话（token 清零）\n聊天历史已保留，可用 /history 查看',
+    reply: '✓ 上下文已压缩\n下次消息将开始新会话',
     handled: true,
   };
 }
@@ -217,16 +219,16 @@ export function handleCompact(ctx: CommandContext): CommandResult {
 export function handleUndo(ctx: CommandContext, args: string): CommandResult {
   const count = args ? parseInt(args, 10) : 1;
   if (isNaN(count) || count <= 0) {
-    return { reply: '用法: /undo [数量]\n例: /undo 2（撤销最近2条对话）', handled: true };
+    return { reply: '用法: /undo [数量]', handled: true };
   }
   const history = ctx.session.chatHistory || [];
   if (history.length === 0) {
-    return { reply: '⚠️ 没有对话记录可撤销', handled: true };
+    return { reply: '无对话可撤销', handled: true };
   }
   const actualCount = Math.min(count, history.length);
   ctx.session.chatHistory = history.slice(0, -actualCount);
   ctx.updateSession({ chatHistory: ctx.session.chatHistory });
-  return { reply: `✅ 已撤销最近 ${actualCount} 条对话`, handled: true };
+  return { reply: `↩ 撤销 ${actualCount} 条`, handled: true };
 }
 
 /** 查看版本信息 */
@@ -235,9 +237,9 @@ export function handleVersion(): CommandResult {
     const __dirname = fileURLToPath(new URL('.', import.meta.url));
     const pkg = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf-8'));
     const version = pkg.version || 'unknown';
-    return { reply: `wechat-claude-code v${version}`, handled: true };
+    return { reply: `v${version}`, handled: true };
   } catch {
-    return { reply: 'wechat-claude-code (version unknown)', handled: true };
+    return { reply: 'v?', handled: true };
   }
 }
 
@@ -246,18 +248,18 @@ export function handlePrompt(_ctx: CommandContext, args: string): CommandResult 
   if (!args) {
     const current = config.systemPrompt;
     if (current) {
-      return { reply: `📝 当前系统提示词:\n${current}\n\n用法:\n/prompt <提示词>  — 设置\n/prompt clear   — 清除`, handled: true };
+      return { reply: `📝 ${current}\n\n/prompt <内容> 设置\n/prompt clear 清除`, handled: true };
     }
-    return { reply: '📝 暂无系统提示词\n\n用法: /prompt <提示词>\n例: /prompt 用中文回答我', handled: true };
+    return { reply: '暂无提示词\n/prompt <内容> 设置', handled: true };
   }
   if (args.trim().toLowerCase() === 'clear') {
     config.systemPrompt = undefined;
     saveConfig(config);
-    return { reply: '✅ 系统提示词已清除', handled: true };
+    return { reply: '✓ 提示词已清除', handled: true };
   }
   config.systemPrompt = args.trim();
   saveConfig(config);
-  return { reply: `✅ 系统提示词已设置:\n${config.systemPrompt}`, handled: true };
+  return { reply: `✓ ${config.systemPrompt}`, handled: true };
 }
 
 export function handleUnknown(cmd: string, args: string): CommandResult {
@@ -271,6 +273,6 @@ export function handleUnknown(cmd: string, args: string): CommandResult {
 
   return {
     handled: true,
-    reply: `未找到 skill: ${cmd}\n输入 /skills 查看可用列表`,
+    reply: `未找到 /${cmd}\n/help 查看命令`,
   };
 }
