@@ -17,6 +17,7 @@ export interface CommandResult {
   reply?: string;
   handled: boolean;
   claudePrompt?: string; // If set, this text should be sent to Claude
+  restart?: boolean; // If true, process should exit after sending reply (daemon manager will restart)
 }
 
 /**
@@ -79,6 +80,8 @@ export function routeCommand(ctx: CommandContext): CommandResult {
     case 'provider':
     case 'prov':
       return handleProvider(ctx, args);
+    case 'restart':
+      return { handled: true, reply: '⟳ 重启中...', restart: true };
     default:
       return handleUnknown(cmd, args);
   }

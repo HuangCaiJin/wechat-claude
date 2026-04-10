@@ -342,6 +342,11 @@ async function handleMessage(
 
     if (result.handled && result.reply) {
       await sender.sendText(fromUserId, contextToken, result.reply);
+      if (result.restart) {
+        // Exit process; launchd/systemd will auto-restart with new settings
+        logger.info('Restart requested, exiting for daemon manager to restart');
+        setTimeout(() => process.exit(0), 500);
+      }
       return;
     }
 

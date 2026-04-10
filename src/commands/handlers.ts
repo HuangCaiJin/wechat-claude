@@ -49,6 +49,7 @@ const HELP_TEXT = ` Commands
  /prompt    系统提示词
  /skills    已安装 Skill
  /provider  切换模型源
+ /restart   重启服务
  /<skill>   触发 Skill
 
 发任意文字与 Claude 对话`;
@@ -327,7 +328,7 @@ export function handleProvider(_ctx: CommandContext, args: string): CommandResul
       writeFileSync(claudeSettingsPath, JSON.stringify(JSON.parse(configJson), null, 2), 'utf-8');
     }
 
-    return { reply: `✓ 已切换 → ${target.name}\n↗ 需重启生效: npm run daemon -- restart`, handled: true };
+    return { reply: `✓ 已切换 → ${target.name}\n自动重启中...`, handled: true, restart: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { reply: `✗ 切换失败: ${msg}`, handled: true };
