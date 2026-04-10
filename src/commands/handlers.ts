@@ -1,10 +1,11 @@
 import type { CommandContext, CommandResult } from './router.js';
 import { scanAllSkills, formatSkillList, findSkill, type SkillInfo } from '../claude/skill-scanner.js';
 import { loadConfig, saveConfig } from '../config.js';
-import { readFileSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
+import { execSync } from 'node:child_process';
 
 // Directories that are off-limits for /cwd
 const BLOCKED_PATH_PREFIXES = ['/etc', '/sys', '/proc', '/dev', '/boot', '/root', '/private/etc'];
@@ -47,6 +48,7 @@ const HELP_TEXT = ` Commands
  /perm      权限模式
  /prompt    系统提示词
  /skills    已安装 Skill
+ /provider  切换模型源
  /<skill>   触发 Skill
 
 发任意文字与 Claude 对话`;
@@ -260,6 +262,76 @@ export function handlePrompt(_ctx: CommandContext, args: string): CommandResult 
   config.systemPrompt = args.trim();
   saveConfig(config);
   return { reply: `✓ ${config.systemPrompt}`, handled: true };
+}
+
+/** List and switch cc-switch providers */
+export function handleProvider(_ctx: CommandContext, args: string): CommandResult {
+  const dbPath = join(homedir(), '.cc-switch', 'cc-switch.db');
+  if (!existsSync(dbPath)) {
+    return { reply: 'cc-switch 未安装\nhttps://github.com/anthropics/cc-switch', handled: true };
+  }
+
+  try {
+    // Read current provider from cc-switch settings
+    const settingsJson = execSync(
+      `sqlite3 "${dbPath}" "SELECT value FROM settings WHERE key='currentProviderClaude';"`,
+      { encoding: 'utf-8' }
+    ).trim();
+
+    // Read all providers
+    const rows = execSync(
+      `sqlite3 -separator '|' "${dbPath}" "SELECT id, name FROM providers WHERE app_type='claude';"`,
+      { encoding: 'utf-8' }
+    ).trim();
+
+    if (!rows) {
+      return { reply: 'cc-switch 无可用 provider', handled: true };
+    }
+
+    const providers = rows.split('\n').map(line => {
+      const [id, name] = line.split('|');
+      return { id, name };
+    });
+
+    // No args: list providers
+    if (!args.trim()) {
+      const currentId = settingsJson;
+      const lines = providers.map(p => {
+        const marker = p.id === currentId ? ' ●' : '  ';
+        return `${marker} /provider ${p.name}`;
+      });
+      return { reply: `── Provider ──\n\n${lines.join('\n')}`, handled: true };
+    }
+
+    // Switch by name
+    const target = providers.find(p => p.name === args.trim() || p.id === args.trim());
+    if (!target) {
+      const names = providers.map(p => p.name).join(', ');
+      return { reply: `✗ 未找到: ${args.trim()}\n可用: ${names}`, handled: true };
+    }
+
+    // Update cc-switch settings
+    execSync(
+      `sqlite3 "${dbPath}" "UPDATE settings SET value='${target.id}' WHERE key='currentProviderClaude';"`,
+      { encoding: 'utf-8' }
+    );
+
+    // Read the provider's settings_config and write to ~/.claude/settings.json
+    const configJson = execSync(
+      `sqlite3 "${dbPath}" "SELECT settings_config FROM providers WHERE id='${target.id}' AND app_type='claude';"`,
+      { encoding: 'utf-8' }
+    ).trim();
+
+    if (configJson) {
+      const claudeSettingsPath = join(homedir(), '.claude', 'settings.json');
+      writeFileSync(claudeSettingsPath, JSON.stringify(JSON.parse(configJson), null, 2), 'utf-8');
+    }
+
+    return { reply: `✓ 已切换 → ${target.name}\n↗ 需重启生效: npm run daemon -- restart`, handled: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { reply: `✗ 切换失败: ${msg}`, handled: true };
+  }
 }
 
 export function handleUnknown(cmd: string, args: string): CommandResult {
