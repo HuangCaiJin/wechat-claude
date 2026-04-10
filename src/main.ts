@@ -462,7 +462,7 @@ async function sendToClaude(
     let toolMessagePending = false; // track if we need to separate tool msgs from text
 
     // Immediately notify user that processing has started
-    await sender.sendText(fromUserId, contextToken, '⏳ 正在处理...');
+    await sender.sendText(fromUserId, contextToken, '⟳ 思考中...');
     anySent = true;
 
     async function flushBuffer(force = false): Promise<void> {

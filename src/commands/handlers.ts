@@ -34,29 +34,22 @@ function validateCwdPath(inputPath: string): { valid: boolean; reason?: string; 
   return { valid: true, resolved };
 }
 
-const HELP_TEXT = `可用命令：
+const HELP_TEXT = ` Commands
 
-会话管理：
-  /help             显示帮助
-  /clear            清除当前会话
-  /reset            完全重置（包括工作目录等设置）
-  /status           查看当前会话状态
-  /compact          压缩上下文（开始新 SDK 会话，保留历史）
-  /history [数量]   查看对话记录（默认最近20条）
-  /undo [数量]      撤销最近对话（默认1条）
+ /clear     清除会话
+ /reset     完全重置
+ /status    会话状态
+ /compact   压缩上下文
+ /history   对话记录
+ /undo      撤销消息
+ /cwd       切换目录
+ /model     切换模型
+ /perm      权限模式
+ /prompt    系统提示词
+ /skills    已安装 Skill
+ /<skill>   触发 Skill
 
-配置：
-  /cwd [路径]       查看或切换工作目录
-  /model [名称]     查看或切换 Claude 模型
-  /permission [模式] 查看或切换权限模式
-  /prompt [内容]    查看或设置系统提示词（全局生效）
-
-其他：
-  /skills [full]    列出已安装的 skill（full 显示描述）
-  /version          查看版本信息
-  /<skill> [参数]   触发已安装的 skill
-
-直接输入文字即可与 Claude Code 对话`;
+发任意文字与 Claude 对话`;
 
 // 缓存 skill 列表，避免每次命令都扫描文件系统
 let cachedSkills: SkillInfo[] | null = null;

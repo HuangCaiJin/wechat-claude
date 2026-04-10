@@ -52,18 +52,18 @@ export interface QueryResult {
  */
 function formatToolUse(toolName: string, input: Record<string, unknown>): string {
   const icons: Record<string, string> = {
-    Bash: "🔧", Read: "📖", Write: "✏️", Edit: "✏️", MultiEdit: "✏️",
-    Grep: "🔍", Glob: "🔍", WebFetch: "🌐", WebSearch: "🌐",
-    TodoWrite: "📝", TodoRead: "📝", Task: "🤖",
+    Bash: "⚡", Read: "📄", Write: "✏️", Edit: "✏️", MultiEdit: "✏️",
+    Grep: "🔍", Glob: "📂", WebFetch: "🌐", WebSearch: "🔎",
+    TodoWrite: "📌", TodoRead: "📌", Task: "🤖",
   };
   const icon = icons[toolName] ?? "⚙️";
   let detail = "";
   if (input.command) detail = String(input.command).slice(0, 80);
-  else if (input.file_path) detail = String(input.file_path);
+  else if (input.file_path) detail = String(input.file_path).split('/').slice(-2).join('/');
   else if (input.pattern) detail = String(input.pattern).slice(0, 60);
   else if (input.query) detail = String(input.query).slice(0, 60);
   else if (input.url) detail = String(input.url).slice(0, 60);
-  return detail ? `${icon} ${toolName}: ${detail}` : `${icon} ${toolName}`;
+  return `${icon} ${detail || toolName}`;
 }
 
 /**
