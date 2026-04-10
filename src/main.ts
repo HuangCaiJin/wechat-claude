@@ -547,6 +547,14 @@ async function sendToClaude(
       Object.assign(result, retryResult);
     }
 
+    // Auto-retry on transient errors (empty response without explicit error)
+    if (!result.text && !result.error) {
+      logger.warn('Empty result, retrying once', { sessionId: result.sessionId });
+      queryOptions.resume = undefined;
+      const retryResult = await claudeQuery(queryOptions);
+      if (retryResult.text) Object.assign(result, retryResult);
+    }
+
     // Flush any remaining buffered content
     await flushBuffer(true);
 
@@ -565,9 +573,25 @@ async function sendToClaude(
       }
     } else if (result.error) {
       logger.error('Claude query error', { error: result.error });
-      await sender.sendText(fromUserId, contextToken, '⚠️ Claude 处理请求时出错，请稍后重试。');
+      // Provide actionable hints based on error type
+      const err = result.error;
+      let hint = '';
+      if (err.includes('timed out')) {
+        hint = '⏱ 超时了\n↗ 重发消息重试\n↗ 或发 /compact 压缩后重试';
+      } else if (err.includes('API key') || err.includes('401') || err.includes('auth') || err.includes('Unauthorized')) {
+        hint = '🔑 API Key 失效\n↗ 在电脑终端检查 ANTHROPIC_API_KEY\n↗ 重启: npm run daemon -- restart';
+      } else if (err.includes('quota') || err.includes('429') || err.includes('rate') || err.includes('limit')) {
+        hint = '📊 被限频或额度不足\n↗ 等几分钟后重试\n↗ 或发 /model 换个模型';
+      } else if (err.includes('model') || err.includes('not found') || err.includes('does not exist')) {
+        hint = '🤖 模型不可用\n↗ 发 /model <模型名> 切换\n↗ 如 /model claude-sonnet-4-6';
+      } else if (err.includes('session') || err.includes('resume') || err.includes('context')) {
+        hint = '💬 会话异常\n↗ 发 /clear 清除后重试';
+      } else {
+        hint = `↗ 重发消息重试\n↗ 或发 /clear 清除会话\n↗ 持续出错: npm run daemon -- restart`;
+      }
+      await sender.sendText(fromUserId, contextToken, `✗ 请求失败\n\n${hint}`);
     } else if (!anySent) {
-      await sender.sendText(fromUserId, contextToken, 'ℹ️ Claude 无返回内容（可能因权限被拒而终止）');
+      await sender.sendText(fromUserId, contextToken, '∅ 无返回内容（可能因权限被拒）');
     }
 
     // Update session with new SDK session ID
@@ -582,7 +606,7 @@ async function sendToClaude(
     } else {
       const errorMsg = err instanceof Error ? err.message : String(err);
       logger.error('Error in sendToClaude', { error: errorMsg });
-      await sender.sendText(fromUserId, contextToken, '⚠️ 处理消息时出错，请稍后重试。');
+      await sender.sendText(fromUserId, contextToken, `✗ 处理出错\n\n↗ 重发消息重试\n↗ 或发 /clear 清除会话`);
     }
     session.state = 'idle';
     sessionStore.save(account.accountId, session);
